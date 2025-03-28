@@ -5,51 +5,17 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Mapa Interativo Gurinhém</title>
-  <!-- CSS do Leaflet sem integrity -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
-  <style>
-    html, body { height: 100%; margin: 0; padding: 0; }
-    #map { height: 100%; width: 100%; }
-    #info-panel {
-      position: fixed;
-      bottom: 0;
-      width: 100%;
-      background: #f8f9fa;
-      border-top: 2px solid #ddd;
-      padding: 8px;
-      box-sizing: border-box;
-      z-index: 9999;
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 10px;
-      font-family: sans-serif;
-    }
-    #info-panel p { margin: 4px 0; }
-    #info-panel p strong { margin-right: 4px; }
-    #info-panel input[type="text"] {
-      padding: 4px;
-      font-size: 1em;
-      min-width: 150px;
-    }
-    #info-panel button {
-      padding: 6px 12px;
-      font-size: 1em;
-      border: none;
-      border-radius: 4px;
-      background-color: #007bff;
-      color: #fff;
-      cursor: pointer;
-    }
-    #info-panel button:hover {
-      background-color: #0056b3;
-    }
-    .status-named { color: green; font-weight: bold; }
-    .status-pending { color: red; font-weight: bold; }
-  </style>
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+  <header id="topo">
+    <img src="logo_gurinhem.png" alt="Prefeitura de Gurinhém" class="logo">
+    <img src="ORBIS_logo_azul_fundo_transparente.png" alt="Orbis" class="logo orbis">
+  </header>
+
   <div id="map"></div>
+
   <div id="info-panel">
     <p><strong>ID:</strong> <span id="street-id">--</span></p>
     <p><strong>Nome:</strong> <input type="text" id="street-name" placeholder="Selecione uma rua" /></p>
@@ -57,102 +23,14 @@
     <button id="save-btn">Salvar</button>
   </div>
 
-  <!-- Scripts do Leaflet sem integrity -->
+  <footer id="rodape">
+    © 2025 Gestão Municipal de Gurinhém – Desenvolvido por Orbis Geotecnologias e Consultoria Ambiental LTDA
+  </footer>
+
   <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
-  <!-- Firebase -->
   <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-database-compat.js"></script>
-  <script>
-    const firebaseConfig = {
-      apiKey: "AIzaSyCTlpyWixrespwJRK61G4iuxMqE2Ds-Qsg",
-      authDomain: "ruas-gurinhem.firebaseapp.com",
-      databaseURL: "https://ruas-gurinhem-default-rtdb.firebaseio.com",
-      projectId: "ruas-gurinhem",
-      storageBucket: "ruas-gurinhem.firebasestorage.app",
-      messagingSenderId: "141299087958",
-      appId: "1:141299087958:web:77a466634da1ecd00fd9f7"
-    };
-
-    firebase.initializeApp(firebaseConfig);
-    const database = firebase.database();
-
-    const map = L.map('map');
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '&copy; OpenStreetMap contributors'
-    }).addTo(map);
-
-    const defaultStyle = { color: '#3388ff', weight: 5, opacity: 0.7 };
-    const highlightStyle = { color: 'yellow', weight: 8, opacity: 1 };
-    let selectedLayer = null;
-
-    fetch('ruas_gr_4326.geojson')
-      .then(response => response.json())
-      .then(geojsonData => {
-        const ruasLayer = L.geoJSON(geojsonData, {
-          style: defaultStyle,
-          onEachFeature: function(feature, layer) {
-            layer.on('click', function(e) {
-              if (selectedLayer) selectedLayer.setStyle(defaultStyle);
-              layer.setStyle(highlightStyle);
-              selectedLayer = layer;
-
-              const streetId = feature.properties.id || feature.properties.fid || feature.properties.ID;
-              document.getElementById('street-id').textContent = streetId || '(sem ID)';
-
-              if (streetId) {
-                const streetRef = database.ref('ruas/' + streetId);
-                streetRef.once('value').then(snapshot => {
-                  const name = snapshot.val()?.nome || '';
-                  document.getElementById('street-name').value = name;
-                  const statusEl = document.getElementById('street-status');
-                  if (name.trim()) {
-                    statusEl.textContent = 'Nomeada';
-                    statusEl.className = 'status-named';
-                  } else {
-                    statusEl.textContent = 'Pendente';
-                    statusEl.className = 'status-pending';
-                  }
-                });
-              }
-            });
-          }
-        }).addTo(map);
-        map.fitBounds(ruasLayer.getBounds());
-      });
-
-    document.getElementById('save-btn').addEventListener('click', () => {
-      const id = document.getElementById('street-id').textContent;
-      const newName = document.getElementById('street-name').value;
-      if (!id || id === '(sem ID)' || id === '--') {
-        alert('Nenhuma rua selecionada.');
-        return;
-      }
-      database.ref('ruas/' + id).update({ nome: newName })
-        .then(() => {
-          alert('Nome da rua atualizado com sucesso!');
-          const statusEl = document.getElementById('street-status');
-          if (newName.trim()) {
-            statusEl.textContent = 'Nomeada';
-            statusEl.className = 'status-named';
-          } else {
-            statusEl.textContent = 'Pendente';
-            statusEl.className = 'status-pending';
-          }
-        })
-        .catch(err => {
-          console.error(err);
-          alert('Erro ao salvar nome da rua.');
-        });
-    });
-
-    map.on('locationfound', function(e) {
-      L.marker(e.latlng).addTo(map).bindPopup('Você está aqui').openPopup();
-    });
-    map.on('locationerror', function(e) {
-      console.warn('Não foi possível obter a localização:', e.message);
-    });
-    map.locate({ setView: false });
-  </script>
+  <script src="script.js"></script>
 </body>
 </html>
+
