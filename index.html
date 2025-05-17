@@ -1,36 +1,207 @@
-
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Mapa Interativo Gurinhém</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
-  <link rel="stylesheet" href="style.css" />
+  <meta charset="utf-8">
+  <title>Mapa - Quadras, Cruzamentos e Ruas</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    html, body { margin: 0; height: 100%; }
+    #map { width: 100%; height: 100%; }
+
+    .legend {
+      position: fixed;
+      bottom: 20px;
+      left: 20px;
+      background: white;
+      padding: 10px;
+      border-radius: 8px;
+      font-size: 14px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+      z-index: 1000;
+    }
+    .legend-item { margin-bottom: 6px; display: flex; align-items: center; }
+    .dot {
+      width: 12px; height: 12px; margin-right: 6px; border-radius: 50%;
+    }
+    .dot.validado { background: green; }
+    .dot.invalido { background: red; }
+    .dot.quadra { background: orange; border-radius: 2px; }
+    .dot.rn-nomeada { background: green; height: 4px; width: 16px; border-radius: 0; }
+    .dot.rn-nao { background: red; height: 4px; width: 16px; border-radius: 0; }
+  </style>
 </head>
 <body>
-  <header id="topo">
-    <img src="logo_gurinhem.png" alt="Prefeitura de Gurinhém" class="logo">
-    <img src="ORBIS_logo_azul_fundo_transparente.png" alt="Orbis" class="logo orbis">
-  </header>
+<div id="map"></div>
+<div class="legend">
+  <div class="legend-item"><div class="dot validado"></div> Cruzamento Validado</div>
+  <div class="legend-item"><div class="dot invalido"></div> Cruzamento Não Validado</div>
+  <div class="legend-item"><div class="dot rn-nomeada"></div> Rua Nomeada</div>
+  <div class="legend-item"><div class="dot rn-nao"></div> Rua Não Nomeada</div>
+  <div class="legend-item"><div class="dot quadra"></div> Quadra</div>
+</div>
 
-  <div id="map"></div>
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-app.js";
+import {
+  getFirestore,
+  collection,
+  getDocs,
+  doc,
+  updateDoc
+} from "https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore.js";
 
-  <div id="info-panel">
-    <p><strong>ID:</strong> <span id="street-id">--</span></p>
-    <p><strong>Nome:</strong> <input type="text" id="street-name" placeholder="Selecione uma rua" /></p>
-    <p><strong>Status:</strong> <span id="street-status">--</span></p>
-    <button id="save-btn">Salvar</button>
-  </div>
+// Config Firebase
+const firebaseConfig = {
+  apiKey: "AIzaSyDkSoxYAWKlI3r4W_K6zVHTeAofAL4L_4I",
+  authDomain: "bd-geo-dec69.firebaseapp.com",
+  projectId: "bd-geo-dec69",
+  storageBucket: "bd-geo-dec69.appspot.com",
+  messagingSenderId: "131287779647",
+  appId: "1:131287779647:web:264d9ed5fcfe08c83e3851"
+};
 
-  <footer id="rodape">
-    © 2025 Gestão Municipal de Gurinhém – Desenvolvido por Orbis Geotecnologias e Consultoria Ambiental LTDA
-  </footer>
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
 
-  <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-database-compat.js"></script>
-  <script src="script.js"></script>
+const map = L.map('map').setView([-7.1234, -35.4252], 16);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 20,
+  attribution: '© OpenStreetMap'
+}).addTo(map);
+
+const cruzamentosLayer = L.layerGroup().addTo(map);
+const quadrasLayer = L.layerGroup().addTo(map);
+const rnLayer = L.layerGroup().addTo(map);
+
+// === Cruzamentos ===
+async function carregarCruzamentos() {
+  const snapshot = await getDocs(collection(db, "cruzamentos_wgs84"));
+  snapshot.forEach(doc => {
+    const d = doc.data();
+    const [lon, lat] = d.coordenadas.coordinates;
+    const cor = d.validado === "VALIDADO" ? "green" : "red";
+
+    L.circleMarker([lat, lon], {
+      radius: 5,
+      color: cor,
+      fillColor: cor,
+      fillOpacity: 0.8,
+      weight: 1
+    })
+    .bindPopup(`<b>${d.descricao || "Sem descrição"}</b><br>Status: ${d.validado}`)
+    .addTo(cruzamentosLayer);
+  });
+}
+
+// === Quadras ===
+async function carregarQuadras() {
+  const snapshot = await getDocs(collection(db, "quadras_gr"));
+  const bounds = [];
+
+  snapshot.forEach(doc => {
+    const d = doc.data();
+    if (d.geom_type !== "Polygon") return;
+
+    try {
+      const coords = JSON.parse(d.coordinates);
+      const invertido = coords[0].map(p => [p[1], p[0]]);
+      const polygon = L.polygon(invertido, {
+        color: "black",
+        weight: 1,
+        fillColor: "orange",
+        fillOpacity: 0.4
+      }).bindPopup(`Quadra ID: ${d.id || "Sem ID"}`);
+
+      polygon.addTo(quadrasLayer);
+      bounds.push(...invertido);
+    } catch (e) {
+      console.error("Erro ao parsear coordenadas da quadra:", d.id, e);
+    }
+  });
+
+  if (bounds.length > 0) {
+    map.fitBounds(bounds);
+  }
+}
+
+// === RN (com input para ruas não nomeadas) ===
+async function carregarRN() {
+  const snapshot = await getDocs(collection(db, "rn_4326"));
+  snapshot.forEach(doc => {
+    const d = doc.data();
+    const tipo = d.geom_type || d.type;
+
+    try {
+      const coords = typeof d.coordinates === "string"
+        ? JSON.parse(d.coordinates)
+        : d.coordinates;
+
+      if (tipo === "LineString" && Array.isArray(coords)) {
+        const invertido = coords.map(p => [p[1], p[0]]);
+        const valor = String(d.NOMEADA ?? "").trim();
+
+        let cor = "gray";
+        if (valor === "1") cor = "green";
+        else if (valor === "2" || valor === "" || valor.toLowerCase() === "null" || valor === "undefined") cor = "red";
+
+        let html = `<b>ID:</b> ${d.id || "Sem ID"}<br><b>Nome:</b> ${d.Nome || "—"}<br>`;
+
+        if (valor === "1") {
+          html += `<b>Status:</b> Nomeada`;
+        } else {
+          html += `
+            <b>Status:</b> Não nomeada<br><br>
+            <label><b>Sugira um nome:</b></label><br>
+            <input type="text" id="input-${doc.id}" placeholder="Ex: Rua da Paz" style="width: 100%; margin-top: 5px;" />
+            <button id="btn-${doc.id}" onclick="enviarNome('${doc.id}')" style="margin-top: 5px;">Enviar</button>
+          `;
+        }
+
+        L.polyline(invertido, {
+          color: cor,
+          weight: 3
+        })
+        .bindPopup(html)
+        .addTo(rnLayer);
+      }
+
+    } catch (e) {
+      console.error("Erro ao carregar linha RN:", d, e);
+    }
+  });
+}
+
+// === Envio para Firebase ===
+window.enviarNome = async function (docId) {
+  const input = document.getElementById(`input-${docId}`);
+  const btn = document.getElementById(`btn-${docId}`);
+  const valor = input.value.trim();
+
+  if (!valor) {
+    alert("Digite um nome antes de enviar.");
+    return;
+  }
+
+  try {
+    const ref = doc(db, "rn_4326", docId);
+    await updateDoc(ref, { sugestao: valor });
+
+    input.disabled = true;
+    btn.disabled = true;
+    btn.innerText = "Enviado!";
+    alert("✅ Sugestão salva com sucesso!");
+  } catch (error) {
+    console.error("Erro ao salvar sugestão:", error);
+    alert("❌ Ocorreu um erro ao salvar.");
+  }
+};
+
+carregarQuadras();
+carregarCruzamentos();
+carregarRN();
+</script>
 </body>
 </html>
 
